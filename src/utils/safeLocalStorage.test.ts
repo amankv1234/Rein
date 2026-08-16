@@ -38,4 +38,13 @@ describe("safeLocalStorage", () => {
 		expect(getLocalStorageItem("k")).toBeNull()
 		expect(setLocalStorageItem("k", "v")).toBe(false)
 	})
+
+	it("returns null/false when localStorage is unavailable", () => {
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: undefined,
+		})
+		expect(getLocalStorageItem("k")).toBeNull()
+		expect(setLocalStorageItem("k", "v")).toBe(false)
+	})
 })
