@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { APP_CONFIG, THEMES } from "../config"
+import { getLocalStorageItem } from "../utils/safeLocalStorage"
 import "../styles.css"
 import {
 	ConnectionProvider,
@@ -46,8 +47,7 @@ function RootComponent() {
 
 function ThemeInit() {
 	useEffect(() => {
-		if (typeof localStorage === "undefined") return
-		const saved = localStorage.getItem(APP_CONFIG.THEME_STORAGE_KEY)
+		const saved = getLocalStorageItem(APP_CONFIG.THEME_STORAGE_KEY)
 		const theme =
 			saved === THEMES.LIGHT || saved === THEMES.DARK ? saved : THEMES.DEFAULT
 		document.documentElement.setAttribute("data-theme", theme)

@@ -9,6 +9,7 @@ import {
 	useCallback,
 	useEffect,
 } from "react"
+import { getLocalStorageItem } from "../utils/safeLocalStorage"
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected"
 
@@ -105,7 +106,7 @@ export function ConnectionProvider({
 							const token =
 								typeof window !== "undefined"
 									? new URLSearchParams(window.location.search).get("token") ||
-										localStorage.getItem("rein_auth_token")
+										getLocalStorageItem("rein_auth_token")
 									: null
 							fetch("/api/debug/report-latency", {
 								method: "POST",

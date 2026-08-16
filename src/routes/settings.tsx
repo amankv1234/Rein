@@ -5,6 +5,10 @@ import { APP_CONFIG, THEMES } from "../config"
 import serverConfig from "../server-config.json"
 import pkg from "../../package.json"
 import { t } from "../utils/i18n"
+import {
+	getLocalStorageItem,
+	setLocalStorageItem,
+} from "../utils/safeLocalStorage"
 export const Route = createFileRoute("/settings")({
 	component: SettingsPage,
 })
@@ -46,43 +50,34 @@ function SettingsPage() {
 	useEffect(() => {
 		setFrontendPort(window.location.port)
 	}, [])
-	// Client Side Settings (LocalStorage)
+	// Client Side Settings (LocalStorage) — safe when storage is blocked
 	const [initialSensitivity, initialInvert] = (() => {
-		try {
-			const savedSensitivity = localStorage.getItem("rein_sensitivity")
-			const parsed = savedSensitivity
-				? Number.parseFloat(savedSensitivity)
-				: Number.NaN
-			return [
-				Number.isFinite(parsed) ? parsed : 1.0,
-				localStorage.getItem("rein_invert") === "true",
-			] as const
-		} catch {
-			return [1.0, false] as const
-		}
+		const savedSensitivity = getLocalStorageItem("rein_sensitivity")
+		const parsed = savedSensitivity
+			? Number.parseFloat(savedSensitivity)
+			: Number.NaN
+		return [
+			Number.isFinite(parsed) ? parsed : 1.0,
+			getLocalStorageItem("rein_invert") === "true",
+		] as const
 	})()
 
 	const sensitivity = useRef(initialSensitivity)
 	const invertScroll = useRef(initialInvert)
 
 	const [theme, setTheme] = useState(() => {
-		if (typeof window === "undefined") return THEMES.DEFAULT
-		try {
-			const saved = localStorage.getItem(APP_CONFIG.THEME_STORAGE_KEY)
-			return saved === THEMES.LIGHT || saved === THEMES.DARK
-				? saved
-				: THEMES.DEFAULT
-		} catch {
-			return THEMES.DEFAULT
-		}
+		const saved = getLocalStorageItem(APP_CONFIG.THEME_STORAGE_KEY)
+		return saved === THEMES.LIGHT || saved === THEMES.DARK
+			? saved
+			: THEMES.DEFAULT
 	})
 
 	const [qrData, setQrData] = useState("")
 	const setConfig = (sensitivity_val: number, invertedScroll_val: boolean) => {
 		sensitivity.current = sensitivity_val
 		invertScroll.current = invertedScroll_val
-		localStorage.setItem("rein_sensitivity", String(sensitivity_val))
-		localStorage.setItem("rein_invert", JSON.stringify(invertedScroll_val))
+		setLocalStorageItem("rein_sensitivity", String(sensitivity_val))
+		setLocalStorageItem("rein_invert", JSON.stringify(invertedScroll_val))
 		const timer = setTimeout(() => {
 			fetch("/api/config", {
 				method: "POST",
@@ -107,10 +102,9 @@ function SettingsPage() {
 	}
 
 	// Load initial state (IP is not stored in localStorage; only sensitivity, invert, theme are client settings)
-	const [authToken, setAuthToken] = useState(() => {
-		if (typeof window === "undefined") return ""
-		return localStorage.getItem("rein_auth_token") || ""
-	})
+	const [authToken, setAuthToken] = useState(
+		() => getLocalStorageItem("rein_auth_token") || "",
+	)
 
 	// Derive URLs once at the top
 	const protocol =
@@ -142,7 +136,7 @@ function SettingsPage() {
 			.then((data) => {
 				if (isMounted && data.token) {
 					setAuthToken(data.token)
-					localStorage.setItem("rein_auth_token", data.token)
+					setLocalStorageItem("rein_auth_token", data.token)
 				}
 			})
 			.catch((e) => console.error("Token fetch error:", e))
@@ -155,7 +149,7 @@ function SettingsPage() {
 	// Effect: Theme
 	useEffect(() => {
 		if (typeof window === "undefined") return
-		localStorage.setItem(APP_CONFIG.THEME_STORAGE_KEY, theme)
+		setLocalStorageItem(APP_CONFIG.THEME_STORAGE_KEY, theme)
 		document.documentElement.setAttribute("data-theme", theme)
 	}, [theme])
 
