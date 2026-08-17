@@ -10,6 +10,10 @@ import { useTrackpadGesture } from "../hooks/useTrackpadGesture"
 import { ScreenMirror } from "../components/Trackpad/ScreenMirror"
 import { ErrorComponent } from "../components/Trackpad/ErrorComponent"
 import { useWebRtcStream } from "../hooks/useWebRtcStream"
+import {
+	getLocalStorageItem,
+	setLocalStorageItem,
+} from "../utils/safeLocalStorage"
 
 export const Route = createFileRoute("/trackpad")({
 	component: TrackpadPage,
@@ -22,16 +26,12 @@ function TrackpadPage() {
 
 	// Scan standard URL parameter fields to locate token strings passed from settings QR codes
 	const urlToken = searchParams.get("token")
-	const token =
-		urlToken ||
-		(typeof window !== "undefined"
-			? localStorage.getItem("rein_auth_token")
-			: null)
+	const token = urlToken || getLocalStorageItem("rein_auth_token")
 
 	// Save token internally if extracted directly from the URL scan pass
 	useEffect(() => {
 		if (urlToken) {
-			localStorage.setItem("rein_auth_token", urlToken)
+			setLocalStorageItem("rein_auth_token", urlToken)
 		}
 	}, [urlToken])
 	const [scrollMode, setScrollMode] = useState(false)
