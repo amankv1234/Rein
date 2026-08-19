@@ -34,16 +34,51 @@ export const ScreenMirror = ({
 	useEffect(() => {
 		const video = videoElementRef.current
 		if (!video) return
-		video.srcObject = videoStream
-		if (videoStream) {
-			video.play().catch(() => {})
+
+		if (video.srcObject !== videoStream) {
+			video.srcObject = videoStream
+		}
+
+		if (videoStream && videoStream.getTracks().length > 0) {
+			// Try to play unmuted first
+			video.muted = false
+			video.play().catch((err) => {
+				if (err.name === "AbortError") return
+				console.log(
+					"[ScreenMirror] Unmuted autoplay blocked, retrying muted (expected behavior):",
+					err.message,
+				)
+				if (video) {
+					video.muted = true
+					video.play().catch((e) => {
+						if (e.name !== "AbortError") {
+							console.error("[ScreenMirror] Muted autoplay failed:", e)
+						}
+					})
+				}
+			})
 		}
 		return () => {
-			if (video) {
+			if (!videoStream && video) {
 				video.srcObject = null
 			}
 		}
 	}, [videoStream])
+
+	const handleInteraction = () => {
+		const video = videoElementRef.current
+		if (video?.muted) {
+			console.log("[ScreenMirror] User interaction detected, unmuting audio.")
+			video.muted = false
+			if (video.paused) {
+				video.play().catch((err) => {
+					if (err.name !== "AbortError") {
+						console.error("[ScreenMirror] Failed to play after unmuting:", err)
+					}
+				})
+			}
+		}
+	}
 
 	const getWaitingText = () => {
 		if (connecting) return t("screenMirror", "establishingConnection")
@@ -70,14 +105,18 @@ export const ScreenMirror = ({
 	}
 
 	return (
-		<div className="absolute inset-0 flex items-center justify-center bg-black overflow-hidden select-none touch-none">
-			{/* Hardware Accelerated Video Renderer */}
+		<div
+			onPointerDown={handleInteraction}
+			onTouchStart={handleInteraction}
+			className="absolute inset-0 flex items-center justify-center bg-black overflow-hidden select-none touch-none"
+		>
+			{/* Hardware Accelerated Video/Audio Renderer */}
+			{/* biome-ignore lint/a11y/useMediaCaption: screen mirror stream does not contain timed text track */}
 			<video
 				ref={videoElementRef}
 				aria-label={t("screenMirror", "ariaLabel")}
 				autoPlay
 				playsInline
-				muted
 				controls={false}
 				className={`w-full h-full object-contain transition-opacity duration-500 ${
 					trackActive ? "opacity-100" : "opacity-0"

@@ -13,6 +13,10 @@ export interface ServerConfig {
 	useSystemGstreamer?: boolean
 	useGlobalGstreamer?: boolean
 	disableBundledGstreamer?: boolean
+	/** Frames per second for the GStreamer capture pipeline. null = let GStreamer decide. */
+	framerate?: number | null
+	/** Custom audio source element/arguments (e.g., pulsesrc, alsasrc, etc.) */
+	audioSource?: string
 	version?: string
 }
 let cachedConfig: ServerConfig | null = null

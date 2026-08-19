@@ -1,21 +1,35 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { Transform } from "node:stream"
-import logger from "../utils/logger.ts"
+import logger from "../../utils/logger.ts"
 import winston from "winston"
-import { getOrCreateActiveToken, isKnownToken } from "./tokenStore.ts"
-import { GstManager } from "./gstreamer/gstManager.ts"
+import { getOrCreateActiveToken } from "../tokenStore.ts"
+import { GstManager } from "../gstreamer/gstManager.ts"
 import { WebRTCManager } from "./webRTC.ts"
-import type { InputConfig } from "./types.ts"
-import { getLanIp, isLoopbackAddress } from "../utils/net.ts"
+import type { InputConfig } from "../types.ts"
+import { getLanIp, isLoopbackAddress } from "../../utils/net.ts"
+import { requireAuth, parseJsonBody, json } from "./utils.ts"
+
+//routes
+import { handleSessions, handleLatency, handleLogs } from "./handlers/debug.ts"
+import {
+	handleOffer,
+	handleAnswer,
+	handleIce,
+	handleSessionSSE,
+	handleSessionDelete,
+} from "./handlers/rtc.ts"
+import type { DebugHandlerDeps } from "./handlers/debug.ts"
+import type { RtcHandlerDeps } from "./handlers/rtc.ts"
 
 let gstManager: GstManager | null = null
 let webrtcManager: WebRTCManager | null = null
 let hostStatus: "stopped" | "starting" | "running" | "error" = "stopped"
-let lastReportedLatencyMs: number | null = null
+const lastReportedLatencyMs: { current: number | null } = { current: null }
 let signalingAttached = false
 
+// ---------------------------------------------------------------------------
+// SSE log transport
 const sseClients = new Set<ServerResponse>()
-
 const LOG_BUFFER_MAX = 500
 const logBuffer: string[] = []
 
@@ -51,85 +65,30 @@ class SseTransport extends winston.transports.Stream {
 
 logger.add(new SseTransport())
 
-const MAX_BODY_BYTES = 1024 * 1024 // 1MB limit
-
-function parseJsonBody<T = unknown>(req: IncomingMessage): Promise<T> {
-	return new Promise((resolve, reject) => {
-		let body = ""
-		let size = 0
-		req.on("data", (chunk) => {
-			size += chunk.length
-			if (size > MAX_BODY_BYTES) {
-				req.destroy()
-				reject(new Error("Payload too large"))
-				return
-			}
-			body += chunk
-		})
-		req.on("end", () => {
-			try {
-				resolve(body ? JSON.parse(body) : ({} as T))
-			} catch (err) {
-				reject(err)
-			}
-		})
-		req.on("error", reject)
-	})
-}
-
-function json(res: ServerResponse, status: number, body: unknown): void {
-	const payload = JSON.stringify(body)
-	res.writeHead(status, {
-		"Content-Type": "application/json",
-		"Content-Length": Buffer.byteLength(payload),
-	})
-	res.end(payload)
-}
-
-function requireAuth(req: IncomingMessage, res: ServerResponse): boolean {
-	const addr = req.socket.remoteAddress
-	const isLocal = isLoopbackAddress(addr)
-	if (isLocal) return true
-
-	const authHeader = req.headers.authorization ?? ""
-	let token = authHeader.startsWith("Bearer ")
-		? authHeader.slice(7).trim()
-		: null
-
-	if (!token) {
-		const url = new URL(req.url ?? "", `http://${req.headers.host}`)
-		token = url.searchParams.get("token")
-	}
-
-	if (!token || !isKnownToken(token)) {
-		json(res, 401, { error: "Unauthorized" })
-		return false
-	}
-	return true
-}
-
 function getEffectiveHostStatus():
 	| "stopped"
 	| "starting"
 	| "running"
 	| "error" {
-	if (hostStatus === "running" && webrtcManager?.hasError()) {
-		return "error"
-	}
+	if (hostStatus === "running" && webrtcManager?.hasError()) return "error"
 	return hostStatus
 }
 
+// ---------------------------------------------------------------------------
+
+// Route attachment
 // biome-ignore lint/suspicious/noExplicitAny: Vite server instance
 export function attachSignalingRoutes(server: any): void {
 	if (signalingAttached) {
-		logger.warn("Signaling routes already attached,skipping")
+		logger.warn("Signaling routes already attached, skipping")
 		return
 	}
+
 	const httpServer = server.httpServer || server
 
 	try {
-		if (!webrtcManager && httpServer) {
-			webrtcManager = new WebRTCManager(httpServer)
+		if (!webrtcManager) {
+			webrtcManager = new WebRTCManager()
 		}
 
 		if (!gstManager) {
@@ -152,16 +111,22 @@ export function attachSignalingRoutes(server: any): void {
 			res: ServerResponse,
 			next?: () => void,
 		) => {
-			const pathname = new URL(
+			const url = new URL(
 				req.url ?? "",
 				`http://${req.headers.host ?? "localhost"}`,
-			).pathname
+			)
+			const { pathname } = url
 
 			if (!pathname.startsWith("/api/")) {
-				if (next) next()
+				next?.()
 				return
 			}
 
+			const remoteAddr = req.socket.remoteAddress
+
+			// ------------------------------------------------------------------
+
+			// Host lifecycle  GET/POST /api/host/*
 			if (pathname === "/api/host/start" && req.method === "POST") {
 				if (!requireAuth(req, res)) return
 				if (hostStatus === "running") {
@@ -179,7 +144,6 @@ export function attachSignalingRoutes(server: any): void {
 						logger.error(`Failed to start GStreamer: ${err}`)
 						hostStatus = "error"
 					})
-
 				json(res, 200, { status: getEffectiveHostStatus() })
 				return
 			}
@@ -215,25 +179,52 @@ export function attachSignalingRoutes(server: any): void {
 				return
 			}
 
+			// ------------------------------------------------------------------
+
+			// Auth  POST /api/auth/token  (localhost only)
 			if (pathname === "/api/auth/token" && req.method === "POST") {
-				const addr = req.socket.remoteAddress
-				const isLocal = isLoopbackAddress(addr)
-				if (!isLocal) {
+				if (!isLoopbackAddress(remoteAddr)) {
 					json(res, 403, { error: "Localhost only" })
 					return
 				}
-				const token = getOrCreateActiveToken()
-				json(res, 200, { token })
+				json(res, 200, { token: getOrCreateActiveToken() })
 				return
 			}
 
+			const rtcDeps: RtcHandlerDeps = { webrtcManager }
+
+			if (pathname === "/api/rtc/offer" && req.method === "POST") {
+				handleOffer(req, res, rtcDeps)
+				return
+			}
+
+			if (pathname === "/api/rtc/answer" && req.method === "POST") {
+				handleAnswer(req, res, rtcDeps)
+				return
+			}
+
+			if (pathname === "/api/rtc/ice" && req.method === "POST") {
+				handleIce(req, res, rtcDeps)
+				return
+			}
+
+			if (pathname === "/api/rtc/session-sse" && req.method === "GET") {
+				handleSessionSSE(req, res, rtcDeps)
+				return
+			}
+
+			if (pathname === "/api/rtc/session" && req.method === "DELETE") {
+				handleSessionDelete(req, res, rtcDeps)
+				return
+			}
+
+			// ------------------------------------------------------------------
+			// Config  POST /api/config
 			if (pathname === "/api/config" && req.method === "POST") {
 				if (!requireAuth(req, res)) return
 				parseJsonBody<Partial<InputConfig>>(req)
 					.then((config) => {
-						if (webrtcManager) {
-							webrtcManager.updateConfig(config)
-						}
+						webrtcManager?.updateConfig(config)
 						json(res, 200, { ok: true })
 					})
 					.catch((err) => {
@@ -242,74 +233,35 @@ export function attachSignalingRoutes(server: any): void {
 				return
 			}
 
+			// ------------------------------------------------------------------
+			// Debug  GET /api/debug/*
+			const debugDeps: DebugHandlerDeps = {
+				webrtcManager,
+				getEffectiveHostStatus,
+				lastReportedLatencyMs,
+				sseClients,
+				logBuffer,
+			}
+
 			if (pathname === "/api/debug/sessions" && req.method === "GET") {
-				if (!requireAuth(req, res)) return
-				const sessions = webrtcManager?.getSessions() ?? []
-				const inputConnectionCount = sessions.filter(
-					(s) => s.hasInputConnection,
-				).length
-				json(res, 200, {
-					hostStatus: getEffectiveHostStatus(),
-					sessionCount: sessions.length,
-					sessions,
-					inputConnectionCount,
-					latencyMs: lastReportedLatencyMs,
-				})
+				handleSessions(req, res, debugDeps)
 				return
 			}
 
 			if (pathname === "/api/debug/report-latency" && req.method === "POST") {
-				if (!requireAuth(req, res)) return
-				parseJsonBody<{ latencyMs?: number }>(req)
-					.then((body) => {
-						if (typeof body.latencyMs === "number" && body.latencyMs >= 0) {
-							lastReportedLatencyMs = body.latencyMs
-						}
-						json(res, 200, { ok: true })
-					})
-					.catch(() => json(res, 400, { ok: false }))
+				handleLatency(req, res, debugDeps)
 				return
 			}
 
 			if (pathname === "/api/debug/logs" && req.method === "GET") {
-				if (!requireAuth(req, res)) return
-				res.writeHead(200, {
-					"Content-Type": "text/event-stream",
-					"Cache-Control": "no-cache",
-					Connection: "keep-alive",
-					"X-Accel-Buffering": "no",
-				})
-				res.write(": connected\n\n")
-				// Replay buffered logs so the client sees history from before opening /debug
-				for (const entry of logBuffer) {
-					try {
-						res.write(entry)
-					} catch {
-						/* client gone already */
-					}
-				}
-				sseClients.add(res)
-				const keepAliveTimer = setInterval(() => {
-					try {
-						res.write(": keep-alive\n\n")
-					} catch {
-						sseClients.delete(res)
-						clearInterval(keepAliveTimer)
-					}
-				}, 15000)
-
-				const cleanupSse = () => {
-					sseClients.delete(res)
-					clearInterval(keepAliveTimer)
-				}
-				req.on("close", cleanupSse)
-				req.on("error", cleanupSse)
+				handleLogs(req, res, debugDeps)
 				return
 			}
-
 			json(res, 404, { error: "API endpoint not found" })
 		}
 
+		// Vite dev: inject into its connect middleware stack.
+		// Production / Nitro: wire directly onto the raw HTTP server.
 		if (server.middlewares) {
 			server.middlewares.use(handleApiRequest)
 		} else if (httpServer && typeof httpServer.on === "function") {
@@ -327,8 +279,9 @@ export function attachSignalingRoutes(server: any): void {
 				handleApiRequest(req, res, next)
 			})
 		}
+
 		signalingAttached = true
-		logger.info("Signaling HTTP routes and WebSocket attached")
+		logger.info("HTTP REST signaling routes attached")
 	} catch (err) {
 		signalingAttached = false
 		throw err
@@ -337,6 +290,6 @@ export function attachSignalingRoutes(server: any): void {
 
 export async function stopServer() {
 	signalingAttached = false
-	if (webrtcManager) webrtcManager.shutdown()
+	webrtcManager?.shutdown()
 	if (gstManager) await gstManager.stop()
 }
