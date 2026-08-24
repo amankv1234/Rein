@@ -13,17 +13,13 @@ export interface ServerConfig {
 	useSystemGstreamer?: boolean
 	useGlobalGstreamer?: boolean
 	disableBundledGstreamer?: boolean
-	/** Frames per second for the GStreamer capture pipeline. null = let GStreamer decide. */
+	/** framerate: null = dynamic frame rate. */
 	framerate?: number | null
-	/** Custom audio source element/arguments (e.g., pulsesrc, alsasrc, etc.) */
 	audioSource?: string
 	version?: string
 }
 let cachedConfig: ServerConfig | null = null
 
-/**
- * Finds the absolute path to server-config.json across dev, production, and Electron environments.
- */
 export function getServerConfigPath(): string | null {
 	const candidates: string[] = []
 
@@ -37,7 +33,7 @@ export function getServerConfigPath(): string | null {
 		)
 	}
 
-	// Current working directory (project root or dist)
+	// Current working directory
 	const cwd = process.cwd()
 	candidates.push(
 		path.join(cwd, "src", "server-config.json"),
@@ -52,25 +48,21 @@ export function getServerConfigPath(): string | null {
 			path.join(currentDir, "..", "..", "src", "server-config.json"),
 			path.join(currentDir, "..", "..", "server-config.json"),
 		)
-	} catch {
-		/* ignore URL resolution errors */
-	}
+	} catch {}
 
 	for (const candidate of candidates) {
 		try {
 			if (fs.existsSync(candidate)) {
 				return candidate
 			}
-		} catch {
-			/* ignore permission/stat errors */
-		}
+		} catch {}
 	}
 
 	return null
 }
 
 /**
- * Safely reads and parses server-config.json. Returns empty object if missing/unreadable.
+ * Parses server-config.json. Returns empty object if missing/unreadable.
  */
 export function loadServerConfig(): ServerConfig {
 	if (cachedConfig) return cachedConfig

@@ -18,6 +18,13 @@ import {
 	handleSessionSSE,
 	handleSessionDelete,
 } from "./handlers/rtc.ts"
+import {
+	handleFileUpload,
+	handleFileList,
+	handleFileDownload,
+	handleFileDelete,
+	handleFileEvents,
+} from "./handlers/fileShare.ts"
 import type { DebugHandlerDeps } from "./handlers/debug.ts"
 import type { RtcHandlerDeps } from "./handlers/rtc.ts"
 
@@ -257,6 +264,36 @@ export function attachSignalingRoutes(server: any): void {
 				handleLogs(req, res, debugDeps)
 				return
 			}
+
+			// ------------------------------------------------------------------
+			// File sharing  /api/files/*
+			if (pathname === "/api/files/upload" && req.method === "POST") {
+				handleFileUpload(req, res, "host").catch((err) => {
+					logger.error(`File upload handler error: ${err}`)
+				})
+				return
+			}
+
+			if (pathname === "/api/files/list" && req.method === "GET") {
+				handleFileList(req, res)
+				return
+			}
+
+			if (pathname === "/api/files/download" && req.method === "GET") {
+				handleFileDownload(req, res)
+				return
+			}
+
+			if (pathname === "/api/files" && req.method === "DELETE") {
+				handleFileDelete(req, res)
+				return
+			}
+
+			if (pathname === "/api/files/events" && req.method === "GET") {
+				handleFileEvents(req, res)
+				return
+			}
+
 			json(res, 404, { error: "API endpoint not found" })
 		}
 
