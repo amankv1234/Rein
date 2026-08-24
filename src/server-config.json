@@ -5,7 +5,8 @@
 	"inputThrottleMs": 8,
 	"sensitivity": 2.1,
 	"invertScroll": false,
-	"verboseLogs": false,
-	"useSystemGstreamer": false,
+	"verboseLogs": true,
+	"useSystemGstreamer": true,
+	"framerate": 60,
 	"version": "0.1.0"
 }

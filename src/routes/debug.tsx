@@ -37,7 +37,8 @@ interface SessionInfo {
 	id: string
 	state: string
 	createdAt: number
-	sseViewerCount: number
+	/** True when the client's session-sse SSE stream is currently connected. */
+	hasSseConnection: boolean
 	hasInputConnection: boolean
 	bytesRecv: number
 	bytesSent: number
@@ -283,9 +284,9 @@ function DebugScreen() {
 						{
 							label: t("debug", "viewersSse"),
 							value: String(
-								serverState.sessions.reduce((a, s) => a + s.sseViewerCount, 0),
+								serverState.sessions.filter((s) => s.hasSseConnection).length,
 							),
-							cls: serverState.sessions.some((s) => s.sseViewerCount > 0)
+							cls: serverState.sessions.some((s) => s.hasSseConnection)
 								? "text-success"
 								: "",
 						},
@@ -541,12 +542,12 @@ function DebugScreen() {
 													{t("debug", "wsPeers")}:{" "}
 													<span
 														className={
-															session.sseViewerCount > 0
+															session.hasSseConnection
 																? "text-success font-bold"
 																: "text-base-content/40"
 														}
 													>
-														{session.sseViewerCount}
+														{session.hasSseConnection ? "yes" : "no"}
 													</span>
 												</div>
 												<div className="text-base-content/60">

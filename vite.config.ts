@@ -4,7 +4,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import { nitro } from "nitro/vite"
 import { defineConfig } from "vite"
 import serverConfig from "./src/server-config.json" with { type: "json" }
-import { attachSignalingRoutes } from "./src/server/server.ts"
+import { attachSignalingRoutes } from "./src/server/siginalling/server.ts"
 import { printWelcome } from "./src/utils/welcome.ts"
 import react from "@vitejs/plugin-react"
 // biome-ignore lint/suspicious/noExplicitAny: Vite server instance

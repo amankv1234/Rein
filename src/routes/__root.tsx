@@ -14,6 +14,10 @@ import {
 	useConnection,
 } from "../contexts/ConnectionProvider"
 import { DebugProvider } from "../contexts/DebugContext"
+import { FileShareProvider, useFileShare } from "../contexts/FileShareContext"
+import { FileShareOverlay } from "../components/FileTransfer/SendFileComponent"
+import { IncomingFileNotifications } from "../components/FileTransfer/IncomingFileNotification"
+import { FolderOpen } from "lucide-react"
 
 export const Route = createRootRoute({
 	shellComponent: AppProviders,
@@ -31,7 +35,9 @@ export const Route = createRootRoute({
 function AppProviders({ children }: { children: React.ReactNode }) {
 	return (
 		<ConnectionProvider>
-			<DebugProvider>{children}</DebugProvider>
+			<DebugProvider>
+				<FileShareProvider>{children}</FileShareProvider>
+			</DebugProvider>
 		</ConnectionProvider>
 	)
 }
@@ -75,6 +81,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 					<Navbar />
 					<main className="flex-1 overflow-hidden relative">{children}</main>
 				</div>
+				<IncomingFileNotifications />
+				<FileShareOverlay />
 				<Scripts />
 			</body>
 		</html>
@@ -132,7 +140,23 @@ function Navbar() {
 				>
 					Settings
 				</Link>
+				<SendFileButton />
 			</div>
 		</div>
+	)
+}
+
+function SendFileButton() {
+	const { setOverlayOpen } = useFileShare()
+	return (
+		<button
+			type="button"
+			id="navbar-send-files-btn"
+			className="btn btn-ghost btn-sm gap-1.5 relative"
+			onClick={() => setOverlayOpen(true)}
+			title="Send Files"
+		>
+			<FolderOpen size={18} />
+		</button>
 	)
 }

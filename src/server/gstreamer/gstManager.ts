@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, execSync, type ChildProcess } from "node:child_process"
 import os from "node:os"
 import fs from "node:fs"
 import path from "node:path"
@@ -8,14 +8,54 @@ import {
 	createCaptureProvider,
 } from "./captureProvider.ts"
 import { resolveGstPaths } from "./gstPaths.ts"
-import { RTP_HOST, RTP_PORT } from "../constants.ts"
+import { RTP_HOST, RTP_PORT, RTP_PORT_AUDIO } from "../constants.ts"
+import {
+	loadServerConfig,
+	type ServerConfig,
+} from "../../utils/configHelper.ts"
 
 export class GstManager {
 	private process: ChildProcess | null = null
 	private provider: CaptureProvider | null = null
 	private stopping = false
+
+	private getAudioSourceBlocks(cfg: ServerConfig): string[] {
+		if (cfg.audioSource) {
+			return cfg.audioSource.trim().split(/\s+/)
+		}
+		const platform = os.platform()
+		if (platform === "win32") {
+			return ["wasapisrc", "loopback=true"]
+		}
+		if (platform === "darwin") {
+			return ["osxaudiosrc"]
+		}
+
+		// Linux (default to pulsesrc with default sink monitor)
+		try {
+			const sink = execSync("pactl get-default-sink", {
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}).trim()
+			if (sink) {
+				logger.info(`Detected default audio sink: ${sink}`)
+				return ["pulsesrc", `device=${sink}.monitor`]
+			}
+		} catch (e) {
+			logger.warn(`Failed to auto-detect monitor sink: ${String(e)}`)
+		}
+		return ["pulsesrc"]
+	}
+
 	private buildPipelineArgs(sourceBlocks: string[]): string[] {
 		const args = [...sourceBlocks]
+		const cfg = loadServerConfig()
+		// framerate: null/undefined → omit videorate and the framerate cap so
+		// GStreamer passes frames at the source's native rate.
+		const framerate =
+			typeof cfg.framerate === "number" && cfg.framerate > 0
+				? cfg.framerate
+				: null
 
 		args.push(
 			"!",
@@ -24,10 +64,13 @@ export class GstManager {
 			"leaky=downstream",
 			"!",
 			"videoconvert",
-			"!",
-			"videorate",
-			"!",
-			"video/x-raw,framerate=60/1",
+		)
+
+		if (framerate !== null) {
+			args.push("!", "videorate", "!", `video/x-raw,framerate=${framerate}/1`)
+		}
+
+		args.push(
 			"!",
 			"x264enc",
 			"tune=zerolatency",
@@ -46,6 +89,33 @@ export class GstManager {
 			"udpsink",
 			`host=${RTP_HOST}`,
 			`port=${RTP_PORT}`,
+			"sync=false",
+			"async=false",
+		)
+
+		// Audio pipeline branch (independent chain)
+		const audioSource = this.getAudioSourceBlocks(cfg)
+		args.push(
+			...audioSource,
+			"!",
+			"queue",
+			"max-size-buffers=10",
+			"leaky=downstream",
+			"!",
+			"audioconvert",
+			"!",
+			"audioresample",
+			"!",
+			"audio/x-raw,rate=48000,channels=2",
+			"!",
+			"opusenc",
+			"!",
+			"rtpopuspay",
+			"pt=111",
+			"!",
+			"udpsink",
+			`host=${RTP_HOST}`,
+			`port=${RTP_PORT_AUDIO}`,
 			"sync=false",
 			"async=false",
 		)
