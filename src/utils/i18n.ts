@@ -5,6 +5,7 @@
 export const i18n = {
 	en: {
 		settings: {
+			copy: "Copy",
 			copied: "Copied to Clipboard!",
 			appVersion: "Rein Remote v{version}",
 			copyFailed:

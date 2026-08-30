@@ -438,7 +438,7 @@ function SettingsPage() {
 											}}
 										>
 											{copied ? <Check size={16} /> : <Copy size={16} />}
-											{copied ? t("settings", "copied") : "Copy"}
+											{copied ? t("settings", "copied") : t("settings", "copy")}
 										</button>
 									</div>
 									{copyError && (
