@@ -356,7 +356,7 @@ export function attachSignalingRoutes(server: any): void {
 					.catch((err) => {
 						if (respondIfPayloadTooLarge(res, err)) return
 						logger.error(`Error in /api/clipboard/copy: ${String(err)}`)
-						json(res, 500, { ok: false, error: "Failed to copy clipboard" })
+						json(res, 400, { ok: false, error: "Failed to copy clipboard" })
 					})
 				return
 			}
