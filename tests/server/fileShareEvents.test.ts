@@ -211,8 +211,30 @@ describe("file share event stream", () => {
 			expect.stringContaining("stream-test.txt"),
 		)
 		expect(res.writes).toContain("stream-bytes")
-		const destroySpy = vi.spyOn(mockStream, "destroy")
+	})
+
+	it("destroys the readStream when response closes before stream finishes", async () => {
+		const fileId = await upload("cancel-test.txt")
+		vi.spyOn(fs, "statSync").mockReturnValue({
+			isFile: () => true,
+			size: 100,
+		} as unknown as fs.Stats)
+		const hangingStream = new Readable({
+			read() {},
+		})
+		const destroySpy = vi.spyOn(hangingStream, "destroy")
+		vi.spyOn(fs, "createReadStream").mockReturnValue(
+			hangingStream as unknown as fs.ReadStream,
+		)
+
+		const res = new FakeResponse()
+		handleFileDownload(
+			loopbackRequest(`/api/files/download?fileId=${fileId}`),
+			asResponse(res),
+		)
+
 		res.emit("close")
+
 		expect(destroySpy).toHaveBeenCalled()
 	})
 
